@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/estilos.css">
+  <link rel="stylesheet" href="assets/estilos.css?v=20261106b">
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 </head>
 <body class="hoja-qr">
@@ -38,8 +38,8 @@
   </div>
 
   <script type="module">
-    import { MODELOS, SITIO } from './assets/modelos.js';
-    import { qrSvg, descargarQrPng } from './assets/qr.js';
+    import { MODELOS, SITIO } from './assets/modelos.js?v=20261106b';
+    import { qrSvg, descargarQrPng } from './assets/qr.js?v=20261106b';
 
     const $ = (id) => document.getElementById(id);
     const guardada = new URLSearchParams(location.search).get('base');

@@ -1,8 +1,8 @@
 // Vitrina: un modelo a la vez, con su botón de AR, su historia narrada y una tira de miniaturas.
-import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js';
-import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js';
-import { Metamorfosis, Fuentes, Adaptadores } from './metamorfosis/metamorfosis.js';
-import { qrSvg } from './qr.js';
+import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js?v=20261106b';
+import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js?v=20261106b';
+import { Metamorfosis, Fuentes, Adaptadores, leerQR } from './metamorfosis/metamorfosis.js?v=20261106b';
+import { qrSvg } from './qr.js?v=20261106b';
 
 const $ = (id) => document.getElementById(id);
 const mv = $('mv');
@@ -63,6 +63,13 @@ async function abrirQr() {
     await preparado;
     if (modelo.id !== id) return;
     await suelo.ir(1);
+    // Comprueba que el QR dibujado se pueda leer: si el navegador no lo pintó bien (GPU de
+    // iPhone, memoria…), se cambia por el QR plano.
+    if (suelo.enDestino && modelo.id === id) {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const leido = await leerQR($('lienzoQr')).catch(() => undefined);
+      if (leido === null && suelo.enDestino && modelo.id === id) throw new Error('El QR 3D no se pudo leer');
+    }
   } catch (e) {
     console.warn('QR 3D no disponible, se muestra el QR plano:', e);
     suelo.reiniciar();

@@ -11,7 +11,7 @@
 // Una fuente puede tener «vista»: lo que se ve en pantalla (el elemento, el modelo) y que el
 // motor oculta mientras las piezas toman su lugar.
 import * as THREE from 'three';
-import { srgbALineal, cssALineal } from './color.js';
+import { srgbALineal, cssALineal } from './color.js?v=20261106b';
 
 const CDN = {
   qr: 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm',
