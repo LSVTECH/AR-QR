@@ -27,7 +27,7 @@ varying float vPlano;
 varying float vBrillo;
 varying vec2 vUv;
 
-float easeInOut(float t) { return t < 0.5 ? 4.0 * t * t * t : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0; }
+float easeInOut(float t) { float u = 2.0 - 2.0 * t; return t < 0.5 ? 4.0 * t * t * t : 1.0 - u * u * u / 2.0; }
 
 // Campo de remolino sin divergencia: rotacional de un potencial suave (curl noise, Bridson 2007).
 vec3 potencial(vec3 p) {
@@ -52,7 +52,9 @@ void main() {
   // Vuelo con aceleración suave y, si se pide, un pequeño rebote al aterrizar.
   float f = easeInOut(t) + uRebote * 0.08 * sin(3.14159265 * smoothstep(0.78, 1.0, t));
   vec3 p = mix(mix(aOrigen, aControl, f), mix(aControl, aDestino, f), f);
-  float envoltura = pow(sin(3.14159265 * clamp(f, 0.0, 1.0)), 1.5);
+  // max(…, 0): sin(π) puede dar un negativo diminuto y pow(negativo) es NaN en las GPU de Apple
+  // (iPhone): la pieza desaparecía justo al aterrizar y el QR quedaba invisible.
+  float envoltura = pow(max(sin(3.14159265 * clamp(f, 0.0, 1.0)), 0.0), 1.5);
   p += rizo(p * uFrecuencia + aGiro.xyz * 3.0) * uRemolino * envoltura;
 
   float aparece = smoothstep(0.0, 0.1, t);
