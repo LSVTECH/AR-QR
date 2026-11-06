@@ -38,18 +38,17 @@
   </div>
 
   <script type="module">
-    import { MODELOS } from './assets/modelos.js';
-    import { qrSvg, descargarQrPng, esDireccionLocal } from './assets/qr.js';
+    import { MODELOS, SITIO } from './assets/modelos.js';
+    import { qrSvg, descargarQrPng } from './assets/qr.js';
 
     const $ = (id) => document.getElementById(id);
     const guardada = new URLSearchParams(location.search).get('base');
-    $('base').value = guardada || new URL('.', location.href).href;
-    $('alertaLocal').hidden = !(esDireccionLocal() && !guardada);
+    $('base').value = guardada || SITIO;
+    $('alertaLocal').hidden = true;
 
     // Los códigos usan ver.html?m=<id>: así coinciden con los que ya están impresos.
     const entradas = [
       ...MODELOS.map((m) => ({ titulo: m.nombre, sub: m.variante, pagina: `ver.html?m=${m.id}`, archivo: `qr-${m.id}.png` })),
-      { titulo: 'India Catalina', sub: 'Las dos versiones', pagina: 'comparar.html', archivo: 'qr-comparar-india.png' },
       { titulo: 'Todos los modelos', sub: 'Vitrina', pagina: 'index.html', archivo: 'qr-vitrina.png' },
     ];
 

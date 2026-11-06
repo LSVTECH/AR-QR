@@ -1,7 +1,8 @@
 // Vitrina: un modelo a la vez, con su botón de AR, su historia narrada y una tira de miniaturas.
-import { MODELOS, GRUPOS, IDIOMAS, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js';
+import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js';
 import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js';
 import { Metamorfosis, Fuentes, Adaptadores } from './metamorfosis/metamorfosis.js';
+import { qrSvg } from './qr.js';
 
 const $ = (id) => document.getElementById(id);
 const mv = $('mv');
@@ -25,17 +26,52 @@ let audio = null; // estado de sonido del modelo actual
 // deja el QR con la paleta del modelo, legible (corrección H, contraste OKLab).
 const suelo = new Metamorfosis({ adaptador: Adaptadores.modelViewer(mv, { lienzo: $('lienzoQr') }) });
 let qrTrasCarga = false;
-const urlModelo = (m) => new URL(`ver.html?m=${m.id}`, location.href).href;
-suelo.alCambiar = (enQR) => {
+let preparado = null; // promesa de suelo.preparar() del modelo actual
+// Los QR siempre apuntan a la dirección pública (GitHub Pages), no a la de esta pestaña.
+const urlModelo = (m) => urlDe(`ver.html?m=${m.id}`);
+let qrPlano = false; // respaldo: QR plano cuando el efecto 3D no puede armarse
+function pintarEnQr(enQR) {
   $('btnQr').setAttribute('aria-pressed', String(enQR));
   escenario.classList.toggle('en-qr', enQR);
   $('leyendaQr').textContent = esEscritorio
     ? 'Escanéalo con tu teléfono · Toca para volver'
     : 'Escanéalo con otro teléfono · Toca para volver';
-};
-$('btnQr').addEventListener('click', () => { tic(); if (suelo.opc) suelo.alternar(); });
-escenario.addEventListener('click', () => { if (suelo.enDestino && !suelo.anim) suelo.ir(0); });
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && suelo.enDestino) suelo.ir(0); });
+}
+suelo.alCambiar = pintarEnQr;
+function mostrarQrPlano(si) {
+  qrPlano = si;
+  const caja = $('qrPlano');
+  if (si) caja.innerHTML = qrSvg(urlModelo(modelo), modelo.nombre);
+  caja.hidden = !si;
+  pintarEnQr(si);
+}
+const enQr = () => qrPlano || suelo.enDestino;
+function cerrarQr() {
+  if (qrPlano) mostrarQrPlano(false);
+  else if (suelo.enDestino && !suelo.anim) suelo.ir(0);
+}
+// Abre el QR escondido en el modelo; si el modelo aún carga, espera, y si el efecto falla en este
+// navegador (WebGL, memoria…), muestra el QR plano para que siempre aparezca.
+async function abrirQr() {
+  if (enQr()) { cerrarQr(); return; }
+  const id = modelo.id;
+  try {
+    // Si el modelo todavía carga, espera a que esté listo (hasta 15 s).
+    for (let t = 0; !preparado && t < 150 && modelo.id === id; t++) await new Promise((r) => setTimeout(r, 100));
+    if (modelo.id !== id) return;
+    if (!preparado) throw new Error('El modelo todavía no ha cargado');
+    await preparado;
+    if (modelo.id !== id) return;
+    await suelo.ir(1);
+  } catch (e) {
+    console.warn('QR 3D no disponible, se muestra el QR plano:', e);
+    suelo.reiniciar();
+    if (modelo.id === id) mostrarQrPlano(true);
+  }
+}
+$('btnQr').addEventListener('click', () => { tic(); abrirQr(); });
+escenario.addEventListener('click', () => { if (enQr()) cerrarQr(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && enQr()) cerrarQr(); });
 
 /* ---------------------------------------------------------------- Respuesta táctil */
 let huboToque = false;
@@ -162,7 +198,6 @@ function mostrar(primera) {
   void nombre.offsetWidth;
   nombre.classList.add('entra');
   $('variante').textContent = modelo.variante;
-  $('enlaceComparar').hidden = modelo.grupo !== 'india';
   $('btnHistoria').hidden = !modelo.narracion;
   $('btnMusica').hidden = !modelo.musica;
   $('btnMusica').setAttribute('aria-pressed', 'false');
@@ -172,7 +207,9 @@ function mostrar(primera) {
   $('miniaturas').children[indice].scrollIntoView({ block: 'nearest', inline: 'center', behavior: primera ? 'auto' : 'smooth' });
 
   // Si se estaba viendo el QR, el modelo nuevo vuelve a mostrarse como QR cuando cargue.
-  qrTrasCarga = suelo.enDestino;
+  qrTrasCarga = enQr();
+  if (qrPlano) mostrarQrPlano(false);
+  preparado = null;
   suelo.reiniciar(); // también limpia una transformación a medias
   $('btnAr').removeAttribute('data-precarga');
   $('btnAr').style.removeProperty('--avance');
@@ -183,6 +220,7 @@ function mostrar(primera) {
   const cargar = () => {
     mv.alt = `${modelo.nombre}, ${modelo.variante}`;
     mv.poster = modelo.poster;
+    mv.maxCameraOrbit = modelo.orbitaMax || 'auto auto auto';
     mv.cameraOrbit = modelo.camara || 'auto auto auto';
     mv.src = modelo.glb;
   };
@@ -202,9 +240,10 @@ mv.addEventListener('progress', (e) => {
 
 mv.addEventListener('load', () => {
   // Prepara el QR escondido en el modelo (las celdas bajo él, todavía invisibles).
-  suelo.preparar({ desde: Fuentes.modelViewer(mv), hacia: Fuentes.qr(urlModelo(modelo)) }).catch(() => {});
+  preparado = suelo.preparar({ desde: Fuentes.modelViewer(mv), hacia: Fuentes.qr(urlModelo(modelo)) });
+  preparado.catch(() => {}); // si falla, abrirQr() muestra el QR plano
   setTimeout(() => mv.classList.remove('cambiando'), 120);
-  if (qrTrasCarga) { qrTrasCarga = false; setTimeout(() => suelo.ir(1), 900); }
+  if (qrTrasCarga) { qrTrasCarga = false; setTimeout(abrirQr, 900); }
   if (mv.availableAnimations.length) {
     mv.animationName = mv.availableAnimations[0];
     mv.currentTime = 0;
@@ -368,7 +407,7 @@ function abrirAr() {
   } else if (mv.canActivateAR) {
     mv.activateAR();
   } else if (esEscritorio) {
-    suelo.ir(1); // en el computador, el QR escondido en el modelo lo lleva al teléfono
+    if (!enQr()) abrirQr(); // en el computador, el QR escondido en el modelo lo lleva al teléfono
   } else if (esAndroid && !enChromeAndroid) {
     // En Chrome se abre de nuevo directo a la AR de este modelo.
     const u = new URL(location.href);

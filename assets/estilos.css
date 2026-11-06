@@ -296,6 +296,23 @@ model-viewer.cambiando { opacity: 0; transform: scale(0.97); }
 }
 .escenario > model-viewer { position: relative; z-index: 1; }
 .escenario.en-qr { cursor: pointer; }
+/* QR plano de respaldo (si el efecto 3D no puede armarse en el navegador) */
+.qr-plano {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  background: var(--fondo, #070B12);
+}
+.qr-plano[hidden] { display: none; }
+.qr-plano svg {
+  width: min(70%, 62vh, 460px);
+  height: auto;
+  padding: 14px;
+  border-radius: 14px;
+  background: #fff;
+}
 .leyenda-qr {
   position: absolute;
   left: 50%;

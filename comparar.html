@@ -2,109 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>India Catalina, dos versiones · Cartagena en AR</title>
-  <meta name="description" content="Las dos versiones de la India Catalina lado a lado">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070B12">
-  <meta name="color-scheme" content="dark">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/estilos.css">
-  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.4.0/model-viewer.min.js"></script>
+  <title>Cartagena en AR</title>
+  <!-- La comparación de las dos India Catalina ya no existe: los QR impresos que apuntaban aquí
+       abren la India Catalina dorada. -->
+  <script>location.replace('ver.html?m=india-catalina-em' + location.hash);</script>
+  <noscript><meta http-equiv="refresh" content="0; url=index.html?m=india-catalina-em"></noscript>
 </head>
-<body class="pagina-comparar">
-  <header class="barra">
-    <a class="volver" href="index.html?m=india-catalina-em">← Vitrina</a>
-    <span class="etiqueta">India Catalina · dos versiones</span>
-    <button class="btn btn--sutil" id="btnSync" type="button" aria-pressed="true" style="min-height:38px;font-size:14px">Girar juntas</button>
-  </header>
-  <main class="comparar" id="comparar"></main>
-
-  <script type="module">
-    import { buscarModelo, usdzDe, esIOS } from './assets/modelos.js';
-    import { soportaQuickLook, abrirQuickLook } from './assets/quicklook.js';
-
-    const conQuickLook = esIOS && soportaQuickLook();
-    const visores = [];
-    for (const id of ['india-catalina-em', 'india-catalina-ic']) {
-      const m = buscarModelo(id);
-      const lado = document.createElement('section');
-      lado.className = 'lado';
-      lado.innerHTML = `
-        <div class="lado__cabeza">
-          <h2>${m.variante}</h2>
-          <span class="etiqueta">${m.stats.mb} MB · ${m.stats.tris.toLocaleString('es-CO')} triángulos</span>
-        </div>
-        <div class="escenario">
-          <div class="foco" aria-hidden="true"></div>
-          <model-viewer src="${m.glb}" poster="${m.poster}" alt="India Catalina, ${m.variante}"
-            camera-controls disable-pan disable-zoom touch-action="pan-y" autoplay camera-orbit="0deg 80deg auto"
-            ar ar-modes="webxr" ar-placement="floor" ar-scale="auto" interaction-prompt="none"
-            shadow-intensity="1.1" shadow-softness="0.9" exposure="1" environment-image="neutral">
-            <span slot="ar-button" hidden></span>
-            <span slot="progress-bar" hidden></span>
-          </model-viewer>
-        </div>
-        <div class="lado__pie">
-          <button class="btn btn--coral" type="button" data-ar>Ver en tu espacio</button>
-          <a class="enlace" href="index.html?m=${m.id}">Con su historia →</a>
-          <details>
-            <summary>Ficha técnica</summary>
-            <dl>
-              <dt>Texturas</dt><dd>${m.stats.texturas}</dd>
-              <dt>Animación</dt><dd>${m.stats.anim}</dd>
-              <dt>Origen</dt><dd>${m.origen}</dd>
-            </dl>
-          </details>
-        </div>`;
-      document.getElementById('comparar').append(lado);
-      const mv = lado.querySelector('model-viewer');
-      const btn = lado.querySelector('[data-ar]');
-      mv.addEventListener('load', () => {
-        if (mv.availableAnimations.length) mv.play();
-        setTimeout(() => { btn.hidden = !(conQuickLook || mv.canActivateAR); }, 500);
-      });
-      btn.hidden = true;
-      btn.addEventListener('click', () => {
-        if (conQuickLook) abrirQuickLook({ url: usdzDe(m, 'es'), titulo: `India Catalina · ${m.variante}`, subtitulo: 'Cartagena en AR' });
-        else mv.activateAR();
-      });
-      // Android (WebXR): narración al colocar el modelo; en iPhone la trae el USDZ.
-      const voz = Object.assign(new Audio(m.narracion.es), { preload: 'none' });
-      mv.addEventListener('ar-status', (e) => {
-        const s = e.detail.status;
-        if (s === 'object-placed' && voz.paused) {
-          voz.currentTime = 0;
-          if (m.sincronizar) mv.currentTime = 0;
-          voz.play().catch(() => {});
-        } else if (s === 'not-presenting') voz.pause();
-      });
-      visores.push({ mv, m });
-    }
-
-    // Intro + tramo en bucle para la versión con Timeline.
-    (function vigilar() {
-      for (const { mv, m } of visores) {
-        const b = m.bucle;
-        if (b && mv.loaded && !mv.paused && mv.currentTime >= b.fin - 1 / 30) mv.currentTime = b.inicio;
-      }
-      requestAnimationFrame(vigilar);
-    })();
-
-    // Al girar una, la otra copia el ángulo.
-    let sync = true;
-    const btnSync = document.getElementById('btnSync');
-    btnSync.addEventListener('click', () => { sync = !sync; btnSync.setAttribute('aria-pressed', String(sync)); });
-    visores.forEach(({ mv }, i) => {
-      mv.addEventListener('camera-change', (e) => {
-        if (!sync || e.detail.source !== 'user-interaction') return;
-        const o = mv.getCameraOrbit();
-        const otro = visores[1 - i].mv;
-        otro.cameraOrbit = `${o.theta}rad ${o.phi}rad auto`;
-        otro.jumpCameraToGoal();
-      });
-    });
-  </script>
-</body>
+<body style="background:#070B12"></body>
 </html>

@@ -46,6 +46,8 @@
         </div>
       </model-viewer>
       <div class="cargando" id="cargando" aria-hidden="true"><i id="cargandoBarra"></i></div>
+      <!-- QR plano de respaldo: se muestra si el efecto 3D no puede armarse en este navegador. -->
+      <div class="qr-plano" id="qrPlano" hidden></div>
       <p class="leyenda-qr etiqueta" id="leyendaQr" aria-live="polite"></p>
     </div>
 
@@ -75,7 +77,6 @@
         </button>
       </div>
       <p class="aviso" id="aviso" hidden></p>
-      <a class="enlace" id="enlaceComparar" href="comparar.html" hidden>Comparar las dos versiones →</a>
     </section>
 
     <nav class="tira" aria-label="Modelos">

@@ -19,6 +19,9 @@ export const MODELOS = [
     sincronizar: true,
     stats: { mb: 4.58, tris: 12620, texturas: 15, anim: 'Puente (10–15 s) + relojes' },
     camara: '25deg 65deg auto',
+    // Maqueta con terreno de una sola cara: la cámara no baja del suelo (desde abajo el pasto
+    // desaparece y el agua tapa la muralla).
+    orbitaMax: 'auto 84deg auto',
   },
   {
     id: 'castillo-san-felipe',
@@ -35,6 +38,7 @@ export const MODELOS = [
     eventos: [{ t: 30.97, audio: 'audio/castillo-canon.mp3' }],
     stats: { mb: 6.17, tris: 30348, texturas: 25, anim: 'Estático' },
     camara: '30deg 55deg auto',
+    orbitaMax: 'auto 84deg auto', // igual que la torre: no se mira por debajo del terreno
   },
   {
     id: 'india-catalina-em',
@@ -51,20 +55,6 @@ export const MODELOS = [
     camara: '20deg 80deg auto',
   },
   {
-    id: 'india-catalina-ic',
-    nombre: 'India Catalina',
-    variante: 'Bronce sobre su pedestal',
-    origen: 'AR-IndiaCatalina',
-    grupo: 'india',
-    glb: 'models/india-catalina-ic.glb',
-    poster: 'posters/india-catalina-ic.webp',
-    descripcion:
-      'Estatua de bronce sobre su pedestal. Respira, se balancea con calma y ofrece la mano derecha en señal de bienvenida.',
-    narracion: { es: 'audio/india-ic-es.mp3' },
-    stats: { mb: 5.43, tris: 57054, texturas: 8, anim: 'Bucle de 10 s: respiración y gesto de bienvenida' },
-    camara: '20deg 78deg auto',
-  },
-  {
     id: 'champeta-pico',
     nombre: 'Champeta',
     variante: 'Picó y bailarines',
@@ -75,7 +65,7 @@ export const MODELOS = [
     descripcion: 'Tarima de champeta con su picó, pantallas y dos bailarines en movimiento.',
     narracion: { es: 'audio/champeta-es.mp3', en: 'audio/champeta-en.mp3', pt: 'audio/champeta-pt.mp3' },
     musica: 'audio/champeta-musica.mp3',
-    stats: { mb: 5.4, tris: 114367, texturas: 10, anim: 'Baile en bucle de 8.3 s' },
+    stats: { mb: 5.4, tris: 114367, texturas: 10, anim: 'Baile en bucle continuo de 7.3 s' },
     camara: '10deg 75deg auto',
   },
   {
@@ -102,8 +92,12 @@ export function buscarModelo(id) {
   return MODELOS.find((m) => m.id === id);
 }
 
+// Dirección pública del sitio (GitHub Pages). Todos los QR apuntan aquí, aunque la página se abra
+// en local o desde otra dirección.
+export const SITIO = 'https://lsvtech.github.io/AR-QR/';
+
 // URL absoluta de una página del sitio (sirve para los QR).
-export function urlDe(pagina, base = location.href) {
+export function urlDe(pagina, base = SITIO) {
   return new URL(pagina, base).href;
 }
 
