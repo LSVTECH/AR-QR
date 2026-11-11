@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/estilos.css?v=20261106b">
+  <link rel="stylesheet" href="assets/estilos.css?v=20261111d">
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 </head>
 <body class="hoja-qr">
@@ -26,7 +26,7 @@
 
     <div class="no-imprimir">
       <div class="alerta" id="alertaLocal" hidden>
-        Estás en una dirección local. Escribe la dirección pública del sitio para que los códigos funcionen en cualquier celular.
+        Esta es una dirección local. Escribe la dirección pública del sitio para que los códigos funcionen en cualquier celular.
       </div>
       <form class="base-url" id="formBase">
         <input id="base" type="url" placeholder="https://tu-dominio/ruta/" aria-label="Dirección pública del sitio" required>
@@ -38,13 +38,14 @@
   </div>
 
   <script type="module">
-    import { MODELOS, SITIO } from './assets/modelos.js?v=20261106b';
-    import { qrSvg, descargarQrPng } from './assets/qr.js?v=20261106b';
+    import { MODELOS, SITIO } from './assets/modelos.js?v=20261111d';
+    import { qrSvg, descargarQrPng, esDireccionLocal } from './assets/qr.js?v=20261111d';
 
     const $ = (id) => document.getElementById(id);
+    // Solo sirven direcciones http(s) completas; cualquier otra cosa vuelve a la dirección pública.
+    const esBase = (v) => { try { return /^https?:$/.test(new URL(v).protocol); } catch { return false; } };
     const guardada = new URLSearchParams(location.search).get('base');
-    $('base').value = guardada || SITIO;
-    $('alertaLocal').hidden = true;
+    $('base').value = esBase(guardada) ? guardada : SITIO;
 
     // Los códigos usan ver.html?m=<id>: así coinciden con los que ya están impresos.
     const entradas = [
@@ -53,7 +54,9 @@
     ];
 
     function pintar() {
+      if (!esBase($('base').value)) $('base').value = SITIO;
       const base = $('base').value.endsWith('/') ? $('base').value : `${$('base').value}/`;
+      $('alertaLocal').hidden = !esDireccionLocal(base);
       $('hoja').innerHTML = '';
       for (const e of entradas) {
         const url = new URL(e.pagina, base).href;
@@ -71,9 +74,8 @@
     }
     $('formBase').addEventListener('submit', (ev) => {
       ev.preventDefault();
-      history.replaceState(null, '', `?base=${encodeURIComponent($('base').value)}`);
-      $('alertaLocal').hidden = true;
       pintar();
+      history.replaceState(null, '', `?base=${encodeURIComponent($('base').value)}`);
     });
     pintar();
   </script>

@@ -1,5 +1,5 @@
 // Servidor estático para probar el visor en local:  node herramientas/servidor.mjs [puerto]
-// (Para AR en el celular el sitio debe estar publicado con HTTPS; ver README.)
+// (Para AR en el celular el sitio debe estar publicado con HTTPS, por ejemplo en GitHub Pages.)
 import { createServer } from 'node:http';
 import { createReadStream, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';

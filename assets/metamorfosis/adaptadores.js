@@ -10,6 +10,7 @@
 //   modo, escena, camara, propio (true si el motor dibuja), dibujar(), sincronizar() → cambió,
 //   proyectar(Vector3) → {x, y} en píxeles de la ventana, desdePantalla(x, y) (solo 2D),
 //   entrar(info), durante(q), salir(), volver()
+// El motor les pone alPerder / alRecuperar: avisan si el navegador pierde el contexto WebGL.
 import * as THREE from 'three';
 
 function crearRenderer(lienzo) {
@@ -19,11 +20,25 @@ function crearRenderer(lienzo) {
   return renderer;
 }
 
+// Aviso de contexto WebGL perdido (pasa en teléfonos con poca memoria): three.js lo recupera solo,
+// pero mientras tanto el lienzo queda en blanco. Devuelve la función que quita los avisos.
+function vigilarContexto(lienzo, ad) {
+  const perder = () => ad.alPerder?.();
+  const recuperar = () => ad.alRecuperar?.();
+  lienzo.addEventListener('webglcontextlost', perder);
+  lienzo.addEventListener('webglcontextrestored', recuperar);
+  return () => {
+    lienzo.removeEventListener('webglcontextlost', perder);
+    lienzo.removeEventListener('webglcontextrestored', recuperar);
+  };
+}
+
 const easeInOut = (t) => { t = Math.min(Math.max(t, 0), 1); return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
 
 export const Adaptadores = {
   // 2D: toda la ventana. Si no se pasa lienzo, se crea uno fijo, transparente y sin eventos.
   pagina({ lienzo } = {}) {
+    const propioLienzo = !lienzo;
     if (!lienzo) {
       lienzo = document.createElement('canvas');
       Object.assign(lienzo.style, { position: 'fixed', inset: '0', width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: '2147483000' });
@@ -44,40 +59,75 @@ export const Adaptadores = {
     };
     ajustar();
     let sucio = false;
-    addEventListener('resize', () => { sucio = ajustar(); });
-    return {
+    const alAjustar = () => { sucio = ajustar(); };
+    addEventListener('resize', alAjustar);
+    let soltar = () => {};
+    const ad = {
       modo: '2d', propio: true, escena, camara, renderer, lienzo,
       desdePantalla: (x, y) => new THREE.Vector3(x - w / 2, h / 2 - y, 0),
       proyectar: (p) => ({ x: p.x + w / 2, y: h / 2 - p.y }),
       sincronizar() { const s = sucio; sucio = false; return s; },
       dibujar: () => renderer.render(escena, camara),
       entrar() {}, durante() {}, salir() {}, volver() {},
-      destruir() { renderer.dispose(); if (!lienzo.isConnected) return; if (lienzo.parentNode === document.body) lienzo.remove(); },
+      destruir() {
+        removeEventListener('resize', alAjustar);
+        soltar();
+        renderer.dispose();
+        if (propioLienzo) lienzo.remove();
+      },
     };
+    soltar = vigilarContexto(lienzo, ad);
+    return ad;
   },
 
   // 3D sobre <model-viewer>. `lienzo` debe cubrir exactamente al visor (position:absolute; inset:0;
   // pointer-events:none) y estar encima de él. camara: 'auto' (vista cenital si el destino va en
-  // el piso), 'cenital' o 'quieta'.
-  modelViewer(mv, { lienzo, camara: modoCamara = 'auto' } = {}) {
+  // el piso), 'cenital' o 'quieta'. reserva: píxeles que deben quedar libres arriba y abajo del
+  // destino en vista cenital (para una leyenda o botones encima del lienzo).
+  modelViewer(mv, { lienzo, camara: modoCamara = 'auto', reserva = 0 } = {}) {
     if (!lienzo) throw new Error('Adaptadores.modelViewer necesita { lienzo } encima del visor');
     const renderer = crearRenderer(lienzo);
     const escena = new THREE.Scene();
     const camara = new THREE.PerspectiveCamera(30, 1, 0.01, 200);
-    let ultima = '', guardado = null, vista = null, reanudar = false;
+    let ultima = '', guardado = null, vista = null, reanudar = false, piso = null, ultimoQ = 0;
+    let soltar = () => {};
+    // Vista cenital que deja el plano del piso entero dentro del lienzo, sea alto o ancho.
+    const encuadrar = () => {
+      const { lado, centroY, pisoY } = piso;
+      const tan = Math.tan(THREE.MathUtils.degToRad(30 / 2));
+      const aspecto = camara.aspect || 1;
+      const alto = Math.max(0.4, Math.min(0.86, 1 - (2 * reserva) / (lienzo.clientHeight || 1)));
+      const alPiso = Math.max(lado / 2 / (tan * alto), lado / 2 / (tan * aspecto * 0.9));
+      vista = { theta: 0, phi: 0.0001, radius: alPiso - (centroY - pisoY), fov: 30 };
+      // Solo mientras dura: model-viewer calcula su plano de recorte con la distancia máxima,
+      // y dejarla enorme siempre recorta la parte delantera de los modelos.
+      mv.minCameraOrbit = 'auto 0deg 0m';
+      mv.maxCameraOrbit = `auto 180deg ${(Math.max(vista.radius, guardado.orbita.radius) * 1.15).toFixed(3)}m`;
+    };
+    const mover = (q) => {
+      ultimoQ = q;
+      if (!vista || !guardado) return;
+      const a = guardado.orbita, b = vista, e = easeInOut((q - 0.12) / 0.78);
+      mv.cameraOrbit = `${a.theta + (b.theta - a.theta) * e}rad ${a.phi + (b.phi - a.phi) * e}rad ${a.radius + (b.radius - a.radius) * e}m`;
+      mv.fieldOfView = `${a.fov + (b.fov - a.fov) * e}deg`;
+      mv.jumpCameraToGoal();
+    };
     const ajustar = () => {
       const w = lienzo.clientWidth, h = lienzo.clientHeight;
       if (!w || !h) return;
       renderer.setSize(w, h, false);
       camara.aspect = w / h;
       ultima = '';
+      // Si la ventana cambia con el destino a la vista (teléfono girado), se vuelve a encuadrar.
+      if (vista && piso && guardado) { encuadrar(); mover(ultimoQ); }
     };
-    new ResizeObserver(ajustar).observe(lienzo);
+    const observador = new ResizeObserver(ajustar);
+    observador.observe(lienzo);
     ajustar();
 
     const pausar = () => { if (!mv.paused) { mv.pause(); reanudar = true; } };
 
-    return {
+    const ad = {
       modo: '3d', propio: true, escena, camara, renderer, lienzo, mv,
       sincronizar() {
         const o = mv.getCameraOrbit(), t = mv.getCameraTarget(), fov = mv.getFieldOfView();
@@ -116,27 +166,13 @@ export const Adaptadores = {
         mv.autoRotate = false;
         mv.cameraControls = false;
         vista = null;
+        piso = null;
+        ultimoQ = 0;
         const cenital = modoCamara === 'cenital' || (modoCamara === 'auto' && info?.piso);
-        if (cenital && info?.piso) {
-          const { lado, centroY, pisoY } = info.piso;
-          const tan = Math.tan(THREE.MathUtils.degToRad(30 / 2));
-          const aspecto = camara.aspect || 1;
-          const alPiso = Math.max(lado / 2 / (tan * 0.86), lado / 2 / (tan * aspecto * 0.9));
-          vista = { theta: 0, phi: 0.0001, radius: alPiso - (centroY - pisoY), fov: 30 };
-          // Solo mientras dura: model-viewer calcula su plano de recorte con la distancia máxima,
-          // y dejarla enorme siempre recorta la parte delantera de los modelos.
-          mv.minCameraOrbit = 'auto 0deg 0m';
-          mv.maxCameraOrbit = `auto 180deg ${(Math.max(vista.radius, guardado.orbita.radius) * 1.15).toFixed(3)}m`;
-        }
+        if (cenital && info?.piso) { piso = info.piso; encuadrar(); }
       },
       volver() { pausar(); },
-      durante(q) {
-        if (!vista || !guardado) return;
-        const a = guardado.orbita, b = vista, e = easeInOut((q - 0.12) / 0.78);
-        mv.cameraOrbit = `${a.theta + (b.theta - a.theta) * e}rad ${a.phi + (b.phi - a.phi) * e}rad ${a.radius + (b.radius - a.radius) * e}m`;
-        mv.fieldOfView = `${a.fov + (b.fov - a.fov) * e}deg`;
-        mv.jumpCameraToGoal();
-      },
+      durante: mover,
       // De vuelta en el origen: todo como estaba.
       salir() {
         if (guardado) {
@@ -149,16 +185,21 @@ export const Adaptadores = {
           mv.autoRotate = guardado.autoRotate;
           guardado = null;
         }
+        vista = null;
+        piso = null;
         if (reanudar) { reanudar = false; mv.play(); }
       },
-      destruir() { renderer.dispose(); },
+      destruir() { observador.disconnect(); soltar(); renderer.dispose(); },
     };
+    soltar = vigilarContexto(lienzo, ad);
+    return ad;
   },
 
   // 3D en una escena three.js propia: las piezas se agregan a `escena` y se dibujan con tu bucle.
   // alPausar / alReanudar: para congelar tus animaciones mientras dura la transformación.
   three({ escena, camara, renderer, alPausar = () => {}, alReanudar = () => {} }) {
-    return {
+    let soltar = () => {};
+    const ad = {
       modo: '3d', propio: false, escena, camara, renderer, lienzo: renderer.domElement,
       sincronizar: () => false,
       proyectar(p) {
@@ -168,7 +209,9 @@ export const Adaptadores = {
       },
       dibujar() {},
       entrar: () => alPausar(), volver: () => alPausar(), durante() {}, salir: () => alReanudar(),
-      destruir() {},
+      destruir() { soltar(); },
     };
+    soltar = vigilarContexto(renderer.domElement, ad);
+    return ad;
   },
 };

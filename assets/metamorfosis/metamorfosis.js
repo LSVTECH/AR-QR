@@ -10,14 +10,14 @@
 // Todo depende de un progreso q (0 = origen, 1 = destino), así la vuelta es la misma
 // animación al revés y también se puede manejar con scroll.
 import * as THREE from 'three';
-import { Piezas } from './render.js?v=20261106b';
-import { emparejar } from './emparejar.js?v=20261106b';
-import { aOklab, ajustarLuz, cssALineal } from './color.js?v=20261106b';
-import { Fuentes } from './fuentes.js?v=20261106b';
-import { Adaptadores } from './adaptadores.js?v=20261106b';
+import { Piezas } from './render.js?v=20261111d';
+import { emparejar } from './emparejar.js?v=20261111d';
+import { aOklab, ajustarLuz, cssALineal } from './color.js?v=20261111d';
+import { Fuentes } from './fuentes.js?v=20261111d';
+import { Adaptadores } from './adaptadores.js?v=20261111d';
 
 export { Fuentes, Adaptadores };
-export { leerQR } from './verificar.js?v=20261106b';
+export { leerQR } from './verificar.js?v=20261111d';
 
 export const POR_DEFECTO = {
   piezas: 'auto',            // cantidad de piezas cuando ningún lado la fija (3D: 2500; 2D: según «paso»)
@@ -39,6 +39,7 @@ export const POR_DEFECTO = {
   plano: 'auto',             // 3D, destino plano: 'piso' (QR) | 'frente' (texto, imagen)
   voxel: false,              // 3D: true o tamaño de celda → cubitos alineados a una rejilla
   en: null,                  // 2D: elemento o DOMRect donde va un destino plano
+  diferir: false,            // true: preparar() no mide nada; se mide una sola vez, al salir en ir(1)
   contraste: { oscuro: 0.36, claro: 0.86 },
 };
 
@@ -138,6 +139,9 @@ export class Metamorfosis {
     this.anim = null;
     this.datos = null;
     this.alCambiar = () => {};
+    // Se llama si el efecto deja de poder dibujarse (el navegador perdió el contexto WebGL):
+    // la página puede mostrar un respaldo (por ejemplo, un QR plano).
+    this.alFallar = () => {};
     this.uMalla = {
       uMetMascara: { value: new THREE.Vector4() },
       uMetEje: { value: new THREE.Vector4() },
@@ -149,7 +153,22 @@ export class Metamorfosis {
       uMetLienzo: { value: new THREE.Vector4(0, 0, 1, 1) },
     };
     this._vivo = true;
-    const bucle = () => { if (!this._vivo) return; this._cuadro(); requestAnimationFrame(bucle); };
+    this._girando = false;
+    this.ad.alPerder = () => this.alFallar(new Error('El navegador perdió el contexto WebGL del efecto'));
+    this.ad.alRecuperar = () => { this._sucio = true; this._despertar(); };
+  }
+
+  // El bucle de dibujo solo corre mientras hay algo que mostrar o animar: en reposo (q = 0) el
+  // efecto no gasta ni un cuadro.
+  _despertar() {
+    if (this._girando || !this._vivo) return;
+    this._girando = true;
+    const bucle = () => {
+      if (!this._vivo) { this._girando = false; return; }
+      this._cuadro();
+      if (this.anim || this._dentro || this.q > 0 || this._sucio) requestAnimationFrame(bucle);
+      else this._girando = false;
+    };
     requestAnimationFrame(bucle);
   }
 
@@ -159,6 +178,10 @@ export class Metamorfosis {
   // Progreso manual (scroll, deslizador). Llama antes a preparar().
   set progreso(q) {
     q = limitar(q);
+    if (!this.datos) {
+      if (q > 0) throw new Error('El progreso manual necesita preparar() sin { diferir }');
+      return;
+    }
     this.anim?.listo();
     this.anim = null;
     if (q > 0 && !this._dentro) this._entrar();
@@ -180,7 +203,10 @@ export class Metamorfosis {
   async preparar(opciones) {
     this.opc = { ...POR_DEFECTO, ...opciones, contraste: { ...POR_DEFECTO.contraste, ...opciones?.contraste } };
     if (!this.opc.desde || !this.opc.hacia) throw new Error('preparar({ desde, hacia }) necesita las dos fuentes');
-    await this._construir();
+    // Un origen que se mueve (modelo animado, página con scroll) se vuelve a medir al salir: con
+    // { diferir } se ahorra esta primera medida, que de todos modos se descarta.
+    const alSalir = this.opc.diferir && this.q === 0 && (this.opc.desde.dinamica || this.ad.modo === '2d');
+    if (!alSalir) await this._construir();
     // El destino con vista (elemento, malla) queda oculto hasta que las piezas lleguen.
     const v = this.opc.hacia.vista;
     if (v?.tipo === 'elemento' && this.q < 1) { v.el.dataset.metOpacidad ??= v.el.style.opacity; v.el.style.opacity = '0'; }
@@ -218,12 +244,15 @@ export class Metamorfosis {
     return new Promise((listo) => {
       this.anim?.listo();
       this.anim = { hacia: destino, ultimo: performance.now(), listo };
+      this._despertar();
     });
   }
 
   destruir() {
     this._vivo = false;
-    this._aplicar(0);
+    this.anim?.listo();
+    this.anim = null;
+    if (this.datos) this._aplicar(0);
     this._salir();
     const v = this.opc?.hacia.vista;
     if (v?.tipo === 'elemento') v.el.style.opacity = v.el.dataset.metOpacidad ?? '';
@@ -376,6 +405,7 @@ export class Metamorfosis {
     this.frente = frente;
     this.info = info;
     this._sucio = true;
+    this._despertar();
   }
 
   _colocar2D(raw, rect) {
@@ -472,6 +502,7 @@ export class Metamorfosis {
     this.ad.salir();
     this._ocultarOrigen(0);
     this._sucio = true;
+    this._despertar();
   }
 
   _aplicar(q) {
@@ -491,6 +522,7 @@ export class Metamorfosis {
       else this._mascaraDestino(q);
     }
     this._sucio = true;
+    this._despertar();
   }
 
   _ocultarOrigen(avance) {

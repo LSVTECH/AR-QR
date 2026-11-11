@@ -48,10 +48,6 @@ export function precargar(url, alAvanzar = () => {}) {
   return tarea;
 }
 
-export function estaListo(url) {
-  return listos.has(url);
-}
-
 // Abre Quick Look. Debe llamarse dentro del toque del usuario.
 export function abrirQuickLook({ url, titulo, subtitulo, accion, alTocarAccion }) {
   const params = new URLSearchParams();

@@ -1,8 +1,7 @@
 // Vitrina: un modelo a la vez, con su botón de AR, su historia narrada y una tira de miniaturas.
-import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js?v=20261106b';
-import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js?v=20261106b';
-import { Metamorfosis, Fuentes, Adaptadores, leerQR } from './metamorfosis/metamorfosis.js?v=20261106b';
-import { qrSvg } from './qr.js?v=20261106b';
+import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js?v=20261111d';
+import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js?v=20261111d';
+import { qrSvg } from './qr.js?v=20261111d';
 
 const $ = (id) => document.getElementById(id);
 const mv = $('mv');
@@ -24,20 +23,42 @@ let audio = null; // estado de sonido del modelo actual
 // Lo hace el motor de la skill «metamorfosis» (assets/metamorfosis/): muestrea el modelo tal
 // como se ve, congela su animación, sube la cámara a vista cenital solo mientras dura el QR y
 // deja el QR con la paleta del modelo, legible (corrección H, contraste OKLab).
-const suelo = new Metamorfosis({ adaptador: Adaptadores.modelViewer(mv, { lienzo: $('lienzoQr') }) });
-let qrTrasCarga = false;
+// El motor (y three.js) se descarga solo cuando hace falta: la página y la AR no dependen de él.
+let suelo = null;  // instancia de Metamorfosis, cuando el motor ya cargó
+let motor = null;  // promesa del módulo del motor
+function cargarMotor() {
+  if (!motor) {
+    motor = import('./metamorfosis/metamorfosis.js?v=20261111d').then((m) => {
+      suelo = new m.Metamorfosis({ adaptador: m.Adaptadores.modelViewer(mv, { lienzo: $('lienzoQr'), reserva: 64 }) });
+      // reserva: la leyenda «Escanéalo…» va sobre el lienzo y no debe tapar el código.
+      suelo.alCambiar = pintarEnQr;
+      // Si el teléfono se queda sin memoria gráfica con el QR a la vista, queda el QR plano.
+      suelo.alFallar = (e) => {
+        if (!suelo.enDestino && !suelo.anim) return;
+        console.warn('QR 3D interrumpido, se muestra el QR plano:', e);
+        suelo.reiniciar();
+        mostrarQrPlano(true);
+      };
+      return m;
+    });
+    motor.catch(() => { motor = null; }); // si la descarga falló, el próximo intento vuelve a probar
+  }
+  return motor;
+}
+let modeloCargado = null; // id del modelo que <model-viewer> ya terminó de cargar
 let preparado = null; // promesa de suelo.preparar() del modelo actual
 // Los QR siempre apuntan a la dirección pública (GitHub Pages), no a la de esta pestaña.
 const urlModelo = (m) => urlDe(`ver.html?m=${m.id}`);
 let qrPlano = false; // respaldo: QR plano cuando el efecto 3D no puede armarse
 function pintarEnQr(enQR) {
   $('btnQr').setAttribute('aria-pressed', String(enQR));
+  $('btnQr').setAttribute('aria-label', enQR ? 'Ocultar el código QR' : 'Ver el código QR de este modelo');
+  if (enQR) $('btnQr').removeAttribute('aria-busy'); // ya empezó a volar: deja de latir
   escenario.classList.toggle('en-qr', enQR);
   $('leyendaQr').textContent = esEscritorio
     ? 'Escanéalo con tu teléfono · Toca para volver'
     : 'Escanéalo con otro teléfono · Toca para volver';
 }
-suelo.alCambiar = pintarEnQr;
 function mostrarQrPlano(si) {
   qrPlano = si;
   const caja = $('qrPlano');
@@ -45,21 +66,28 @@ function mostrarQrPlano(si) {
   caja.hidden = !si;
   pintarEnQr(si);
 }
-const enQr = () => qrPlano || suelo.enDestino;
+const enQr = () => qrPlano || Boolean(suelo?.enDestino);
 function cerrarQr() {
   if (qrPlano) mostrarQrPlano(false);
-  else if (suelo.enDestino && !suelo.anim) suelo.ir(0);
+  else if (suelo?.enDestino && !suelo.anim) suelo.ir(0);
 }
 // Abre el QR escondido en el modelo; si el modelo aún carga, espera, y si el efecto falla en este
 // navegador (WebGL, memoria…), muestra el QR plano para que siempre aparezca.
+let abriendo = false; // un toque a la vez: los demás se ignoran mientras el QR se prepara
+const ocupado = (si) => { abriendo = si; $('btnQr').toggleAttribute('aria-busy', si); };
 async function abrirQr() {
   if (enQr()) { cerrarQr(); return; }
+  if (abriendo) return;
   const id = modelo.id;
+  ocupado(true); // el primer toque descarga el motor: el botón late mientras tanto
   try {
+    const m = await cargarMotor();
     // Si el modelo todavía carga, espera a que esté listo (hasta 15 s).
-    for (let t = 0; !preparado && t < 150 && modelo.id === id; t++) await new Promise((r) => setTimeout(r, 100));
+    for (let t = 0; modeloCargado !== id && t < 150 && modelo.id === id; t++) await new Promise((r) => setTimeout(r, 100));
     if (modelo.id !== id) return;
-    if (!preparado) throw new Error('El modelo todavía no ha cargado');
+    if (modeloCargado !== id) throw new Error('El modelo todavía no ha cargado');
+    // { diferir }: el modelo se mide una sola vez, ya congelado, al salir en ir(1).
+    preparado ??= suelo.preparar({ desde: m.Fuentes.modelViewer(mv), hacia: m.Fuentes.qr(urlModelo(modelo)), diferir: true });
     await preparado;
     if (modelo.id !== id) return;
     await suelo.ir(1);
@@ -67,13 +95,17 @@ async function abrirQr() {
     // iPhone, memoria…), se cambia por el QR plano.
     if (suelo.enDestino && modelo.id === id) {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const leido = await leerQR($('lienzoQr')).catch(() => undefined);
-      if (leido === null && suelo.enDestino && modelo.id === id) throw new Error('El QR 3D no se pudo leer');
+      // undefined = no se pudo comprobar (sin red para el lector): se deja el QR 3D.
+      const leido = await m.leerQR($('lienzoQr')).catch(() => undefined);
+      const mal = leido === null || (typeof leido === 'string' && leido !== urlModelo(modelo));
+      if (mal && suelo.enDestino && modelo.id === id) throw new Error('El QR 3D no se pudo leer');
     }
   } catch (e) {
     console.warn('QR 3D no disponible, se muestra el QR plano:', e);
-    suelo.reiniciar();
+    suelo?.reiniciar();
     if (modelo.id === id) mostrarQrPlano(true);
+  } finally {
+    ocupado(false);
   }
 }
 $('btnQr').addEventListener('click', () => { tic(); abrirQr(); });
@@ -213,11 +245,12 @@ function mostrar(primera) {
   [...$('miniaturas').children].forEach((b, i) => b.setAttribute('aria-current', String(i === indice)));
   $('miniaturas').children[indice].scrollIntoView({ block: 'nearest', inline: 'center', behavior: primera ? 'auto' : 'smooth' });
 
-  // Si se estaba viendo el QR, el modelo nuevo vuelve a mostrarse como QR cuando cargue.
-  qrTrasCarga = enQr();
+  // Al cambiar de modelo el QR se cierra: el modelo nuevo (y el anterior, si se vuelve a él)
+  // se ve normal; el QR solo se abre con el botón.
   if (qrPlano) mostrarQrPlano(false);
   preparado = null;
-  suelo.reiniciar(); // también limpia una transformación a medias
+  modeloCargado = null;
+  suelo?.reiniciar(); // también limpia una transformación a medias
   $('btnAr').removeAttribute('data-precarga');
   $('btnAr').style.removeProperty('--avance');
 
@@ -246,11 +279,15 @@ mv.addEventListener('progress', (e) => {
 });
 
 mv.addEventListener('load', () => {
-  // Prepara el QR escondido en el modelo (las celdas bajo él, todavía invisibles).
-  preparado = suelo.preparar({ desde: Fuentes.modelViewer(mv), hacia: Fuentes.qr(urlModelo(modelo)) });
-  preparado.catch(() => {}); // si falla, abrirQr() muestra el QR plano
+  modeloCargado = modelo.id;
+  // El motor se descarga en un rato libre para que el primer toque al QR responda al instante.
+  // En el teléfono solo si no llegó a ver la AR directa ni pidió ahorrar datos.
+  if (esEscritorio || (!ahorroDatos && !pideAr)) {
+    const precalentar = () => cargarMotor().catch(() => {});
+    if (window.requestIdleCallback) requestIdleCallback(precalentar, { timeout: 4000 });
+    else setTimeout(precalentar, 1500); // Safari
+  }
   setTimeout(() => mv.classList.remove('cambiando'), 120);
-  if (qrTrasCarga) { qrTrasCarga = false; setTimeout(abrirQr, 900); }
   if (mv.availableAnimations.length) {
     mv.animationName = mv.availableAnimations[0];
     mv.currentTime = 0;
@@ -282,10 +319,8 @@ function crearSonido() {
     musica: modelo.musica ? Object.assign(new Audio(modelo.musica), { loop: true, volume: 0.5, preload: 'none' }) : null,
   };
   const actual = audio;
-  narracion.addEventListener('timeupdate', () => {
-    const t = narracion.currentTime + (modelo.retrasoNarracion || 0);
-    for (const e of actual.eventos) if (!e.hecho && t >= e.t) { e.hecho = true; e.audio.play().catch(() => {}); }
-  });
+  // Respaldo del vigía por cuadros (que no corre con la pestaña oculta ni dentro de la AR).
+  narracion.addEventListener('timeupdate', () => revisarEventos(actual));
   narracion.addEventListener('ended', () => {
     actual.sonando = false;
     actual.ambiente?.pause();
@@ -293,6 +328,60 @@ function crearSonido() {
   });
   pintarHistoria();
 }
+
+// Efectos atados a un momento de la narración (cañón, puerta).
+function revisarEventos(actual) {
+  if (audio !== actual || !actual.sonando) return;
+  const t = actual.narracion.currentTime + (modelo.retrasoNarracion || 0);
+  for (const e of actual.eventos) if (!e.hecho && t >= e.t) { e.hecho = true; e.audio.play().catch(() => {}); }
+}
+// Los revisa en cada cuadro: «timeupdate» solo llega unas 4 veces por segundo.
+function vigilarEventos(actual) {
+  cancelAnimationFrame(actual.cuadro);
+  if (!actual.eventos.length) return;
+  const paso = () => {
+    if (audio !== actual || !actual.sonando) return;
+    revisarEventos(actual);
+    actual.cuadro = requestAnimationFrame(paso);
+  };
+  paso();
+}
+// iPhone solo deja sonar un audio que arrancó dentro de un toque: los efectos se «desbloquean»
+// en el toque de la historia (suenan un instante en silencio) para poder dispararse después.
+const desbloqueados = new WeakSet();
+function desbloquear(e) {
+  const a = e.audio;
+  if (desbloqueados.has(a)) return;
+  desbloqueados.add(a);
+  a.muted = true;
+  a.play()
+    .then(() => { if (!e.hecho) { a.pause(); a.currentTime = 0; } })
+    .catch(() => { desbloqueados.delete(a); })
+    .finally(() => { a.muted = false; });
+}
+
+// Al ocultar la pestaña se pausa lo que suena; al volver, sigue donde iba.
+let pausados = [];
+document.addEventListener('visibilitychange', () => {
+  if (!audio) return;
+  if (document.hidden) {
+    pausados = [audio.narracion, audio.ambiente, audio.musica, ...audio.eventos.map((e) => e.audio)]
+      .filter((a) => a && !a.paused);
+    pausados.forEach((a) => a.pause());
+  } else {
+    const actual = audio;
+    for (const a of pausados) {
+      a.play().catch(() => {
+        // El navegador no dejó reanudar sin un toque: los botones vuelven a su estado real.
+        if (audio !== actual) return;
+        if (a === actual.narracion) detenerNarracion();
+        if (a === actual.musica) { $('btnMusica').setAttribute('aria-pressed', 'false'); $('arMusica').setAttribute('aria-pressed', 'false'); }
+      });
+    }
+    pausados = [];
+    vigilarEventos(actual);
+  }
+});
 
 function pintarHistoria() {
   const texto = audio?.sonando ? '■ Detener historia' : '▶ Historia';
@@ -305,6 +394,8 @@ function pintarHistoria() {
 function detenerNarracion() {
   if (!audio) return;
   audio.sonando = false;
+  pausados = [];
+  cancelAnimationFrame(audio.cuadro);
   clearTimeout(audio.retraso);
   audio.narracion.pause();
   audio.ambiente?.pause();
@@ -324,14 +415,18 @@ function iniciarNarracion() {
   audio.sonando = true;
   audio.narracion.src = modelo.narracion[idiomaDe(modelo)];
   audio.narracion.currentTime = 0;
-  audio.eventos.forEach((e) => { e.hecho = false; e.audio.currentTime = 0; });
+  audio.eventos.forEach((e) => { e.hecho = false; e.audio.pause(); e.audio.currentTime = 0; desbloquear(e); });
   if (modelo.sincronizar && mv.availableAnimations.length) {
     mv.currentTime = 0; // la animación arranca con la voz, como en la Timeline de Unity
     mv.play();
   }
   if (audio.ambiente) { audio.ambiente.currentTime = 0; audio.ambiente.play().catch(() => {}); }
   const actual = audio;
-  audio.retraso = setTimeout(() => actual.narracion.play().catch(() => {}), (modelo.retrasoNarracion || 0) * 1000);
+  const sonar = () => actual.narracion.play().catch(() => {});
+  // Sin retraso suena dentro del mismo toque (iPhone lo exige); con retraso, un instante después.
+  if (modelo.retrasoNarracion) audio.retraso = setTimeout(sonar, modelo.retrasoNarracion * 1000);
+  else sonar();
+  vigilarEventos(actual);
   pintarHistoria();
 }
 

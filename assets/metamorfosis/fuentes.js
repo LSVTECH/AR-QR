@@ -11,7 +11,7 @@
 // Una fuente puede tener «vista»: lo que se ve en pantalla (el elemento, el modelo) y que el
 // motor oculta mientras las piezas toman su lugar.
 import * as THREE from 'three';
-import { srgbALineal, cssALineal } from './color.js?v=20261106b';
+import { srgbALineal, cssALineal } from './color.js?v=20261111d';
 
 const CDN = {
   qr: 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm',
@@ -38,8 +38,18 @@ function pixeles(textura) {
   return datos;
 }
 
+// Color de una textura en (u, v), en sRGB lineal y con su alfa (0..255); null si no se puede leer.
+function muestra(tex, ux, uy) {
+  if (!tex) return null;
+  const x = Math.floor((((ux % 1) + 1) % 1) * tex.lado);
+  const y = Math.floor((((uy % 1) + 1) % 1) * tex.lado);
+  const i = (y * tex.lado + x) * 4;
+  return [srgbALineal(tex.data[i] / 255), srgbALineal(tex.data[i + 1] / 255), srgbALineal(tex.data[i + 2] / 255), tex.data[i + 3]];
+}
+
 // n puntos al azar sobre la superficie visible de `raiz`, repartidos por área, en la pose actual
-// (esqueletos y morph targets incluidos), con el color de su textura. `extra` se aplica después
+// (esqueletos y morph targets incluidos), con el color que se ve: color del material × textura ×
+// color de vértice, más lo que el material emite (pantallas, letreros). `extra` se aplica después
 // de matrixWorld (para pasar a otro sistema de coordenadas).
 export function muestrearSuperficie(raiz, n, extra = new THREE.Matrix4()) {
   const mallas = [];
@@ -91,16 +101,30 @@ export function muestrearSuperficie(raiz, n, extra = new THREE.Matrix4()) {
       .applyMatrix4(m.multiplyMatrices(extra, o.matrixWorld));
 
     let r = mat.color?.r ?? 1, g = mat.color?.g ?? 1, bl = mat.color?.b ?? 1;
-    const tex = pixeles(mat.map), uvs = geo.attributes.uv;
-    if (tex && uvs) {
+    const uvs = geo.attributes.uv, pesos = [1 - u - w, u, w];
+    let ux = 0, uy = 0;
+    if (uvs) {
       uvA.fromBufferAttribute(uvs, ids[0]); uvB.fromBufferAttribute(uvs, ids[1]); uvC.fromBufferAttribute(uvs, ids[2]);
-      const ux = uvA.x * (1 - u - w) + uvB.x * u + uvC.x * w;
-      const uy = uvA.y * (1 - u - w) + uvB.y * u + uvC.y * w;
-      const x = Math.floor((((ux % 1) + 1) % 1) * tex.lado);
-      const y = Math.floor((((uy % 1) + 1) % 1) * tex.lado);
-      const i = (y * tex.lado + x) * 4;
-      if (tex.data[i + 3] < 128) continue; // parte transparente (calcomanía, recorte): otro punto
-      r *= srgbALineal(tex.data[i] / 255); g *= srgbALineal(tex.data[i + 1] / 255); bl *= srgbALineal(tex.data[i + 2] / 255);
+      ux = uvA.x * pesos[0] + uvB.x * pesos[1] + uvC.x * pesos[2];
+      uy = uvA.y * pesos[0] + uvB.y * pesos[1] + uvC.y * pesos[2];
+      const base = muestra(pixeles(mat.map), ux, uy);
+      if (base) {
+        if (base[3] < 128) continue; // parte transparente (calcomanía, recorte): otro punto
+        r *= base[0]; g *= base[1]; bl *= base[2];
+      }
+    }
+    // Color de vértice (viene lineal en glTF).
+    const cv = mat.vertexColors ? geo.attributes.color : null;
+    if (cv) {
+      let vr = 0, vg = 0, vb = 0;
+      for (let j = 0; j < 3; j++) { vr += cv.getX(ids[j]) * pesos[j]; vg += cv.getY(ids[j]) * pesos[j]; vb += cv.getZ(ids[j]) * pesos[j]; }
+      r *= vr; g *= vg; bl *= vb;
+    }
+    // Lo que el material emite se suma: sin esto, una pantalla encendida saldría negra.
+    const em = mat.emissive, fuerza = mat.emissiveIntensity ?? 1;
+    if (em && fuerza > 0 && (em.r || em.g || em.b)) {
+      const e = (uvs && muestra(pixeles(mat.emissiveMap), ux, uy)) || [1, 1, 1];
+      r = Math.min(1, r + em.r * e[0] * fuerza); g = Math.min(1, g + em.g * e[1] * fuerza); bl = Math.min(1, bl + em.b * e[2] * fuerza);
     }
     pos.set([punto.x, punto.y, punto.z], k * 3);
     col.set([r, g, bl], k * 3);
@@ -289,10 +313,11 @@ export const Fuentes = {
     };
   },
 
-  // Código QR. Cada módulo es una pieza (con su borde de silencio). Sus módulos tienen «rol»
+  // Código QR. Cada módulo es una pieza, con su borde de silencio de 4 módulos (el que pide la
+  // norma: sobre un fondo oscuro, con menos las cámaras tardan en encontrarlo). Sus módulos tienen «rol»
   // (1 oscuro, 2 claro): con color 'origen', cada pieza conserva el tono del origen y solo se
   // oscurece o aclara lo justo para que el código se lea.
-  qr(texto, { correccion, margen = 3, oscuro = '#141414', claro = '#f7f5f0' } = {}) {
+  qr(texto, { correccion, margen = 4, oscuro = '#141414', claro = '#f7f5f0' } = {}) {
     return {
       clase: 'plano', esQR: true, plano: true,
       async obtener({ color }) {
