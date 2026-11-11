@@ -402,7 +402,8 @@ model-viewer.cambiando { opacity: 0; transform: scale(0.97); }
 .pildora[aria-pressed='true'] { background: var(--oro); color: var(--noche); }
 model-viewer[ar-status='session-started'] .ar-controles,
 model-viewer[ar-status='object-placed'] .ar-controles { display: flex; }
-model-viewer[ar-status='session-started'] .ar-ayuda { display: block; }
+model-viewer[ar-status='session-started'] .ar-ayuda,
+model-viewer[ar-status='object-placed'][ar-tracking='not-tracking'] .ar-ayuda { display: block; }
 
 /* --- Hoja de QR --- */
 body.hoja-qr { min-height: 100dvh; }

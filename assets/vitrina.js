@@ -1,7 +1,7 @@
 // Vitrina: un modelo a la vez, con su botón de AR, su historia narrada y una tira de miniaturas.
-import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js?v=20261111d';
-import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js?v=20261111d';
-import { qrSvg } from './qr.js?v=20261111d';
+import { MODELOS, GRUPOS, IDIOMAS, urlDe, usdzDe, esIOS, esAndroid, enAppExterna, enlaceChrome } from './modelos.js?v=20261111e';
+import { soportaQuickLook, precargar, abrirQuickLook } from './quicklook.js?v=20261111e';
+import { qrSvg } from './qr.js?v=20261111e';
 
 const $ = (id) => document.getElementById(id);
 const mv = $('mv');
@@ -24,26 +24,48 @@ let audio = null; // estado de sonido del modelo actual
 // como se ve, congela su animación, sube la cámara a vista cenital solo mientras dura el QR y
 // deja el QR con la paleta del modelo, legible (corrección H, contraste OKLab).
 // El motor (y three.js) se descarga solo cuando hace falta: la página y la AR no dependen de él.
-let suelo = null;  // instancia de Metamorfosis, cuando el motor ya cargó
+let suelo = null;  // instancia de Metamorfosis (tiene su propio contexto WebGL)
 let motor = null;  // promesa del módulo del motor
 function cargarMotor() {
   if (!motor) {
-    motor = import('./metamorfosis/metamorfosis.js?v=20261111d').then((m) => {
-      suelo = new m.Metamorfosis({ adaptador: m.Adaptadores.modelViewer(mv, { lienzo: $('lienzoQr'), reserva: 64 }) });
-      // reserva: la leyenda «Escanéalo…» va sobre el lienzo y no debe tapar el código.
-      suelo.alCambiar = pintarEnQr;
-      // Si el teléfono se queda sin memoria gráfica con el QR a la vista, queda el QR plano.
-      suelo.alFallar = (e) => {
-        if (!suelo.enDestino && !suelo.anim) return;
-        console.warn('QR 3D interrumpido, se muestra el QR plano:', e);
-        suelo.reiniciar();
-        mostrarQrPlano(true);
-      };
-      return m;
-    });
+    motor = import('./metamorfosis/metamorfosis.js?v=20261111e');
     motor.catch(() => { motor = null; }); // si la descarga falló, el próximo intento vuelve a probar
   }
   return motor;
+}
+// El efecto se arma en el primer toque al QR (en el computador, desde que carga el modelo): su
+// lienzo 3D ocupa memoria gráfica que en el celular le hace falta a la AR.
+function crearSuelo(m) {
+  if (suelo) return suelo;
+  const efecto = new m.Metamorfosis({ adaptador: m.Adaptadores.modelViewer(mv, { lienzo: $('lienzoQr'), reserva: 64 }) });
+  // reserva: la leyenda «Escanéalo…» va sobre el lienzo y no debe tapar el código.
+  efecto.alCambiar = pintarEnQr;
+  // Si el teléfono se queda sin memoria gráfica con el QR a la vista, queda el QR plano.
+  efecto.alFallar = (e) => {
+    if (!efecto.enDestino && !efecto.anim) return;
+    console.warn('QR 3D interrumpido, se muestra el QR plano:', e);
+    efecto.reiniciar();
+    mostrarQrPlano(true);
+  };
+  return (suelo = efecto);
+}
+// Antes de la AR: suelta el lienzo 3D del QR para que la cámara y el modelo tengan toda la memoria
+// gráfica (con dos contextos WebGL, en celulares modestos el modelo no aparece en la AR). El
+// próximo toque al QR lo vuelve a armar en un lienzo nuevo.
+let turnoQr = 0;            // cambia cuando algo cancela el QR que se está abriendo
+let soltarAlTerminar = false; // la AR empezó mientras el QR se armaba: se suelta al terminar
+function soltarSuelo() {
+  if (qrPlano) mostrarQrPlano(false);
+  turnoQr++;
+  if (!suelo) return;
+  suelo.reiniciar(); // el modelo vuelve a verse normal al instante, aunque el QR estuviera a medias
+  if (abriendo) { soltarAlTerminar = true; return; }
+  suelo.destruir();
+  suelo = null;
+  preparado = null;
+  const viejo = $('lienzoQr');
+  try { viejo.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ya no tenía */ }
+  viejo.replaceWith(viejo.cloneNode(false)); // un lienzo con el contexto perdido no se puede reusar
 }
 let modeloCargado = null; // id del modelo que <model-viewer> ya terminó de cargar
 let preparado = null; // promesa de suelo.preparar() del modelo actual
@@ -78,34 +100,38 @@ const ocupado = (si) => { abriendo = si; $('btnQr').toggleAttribute('aria-busy',
 async function abrirQr() {
   if (enQr()) { cerrarQr(); return; }
   if (abriendo) return;
-  const id = modelo.id;
+  const id = modelo.id, turno = turnoQr;
+  const vigente = () => modelo.id === id && turnoQr === turno; // ni cambió el modelo ni empezó la AR
   ocupado(true); // el primer toque descarga el motor: el botón late mientras tanto
   try {
     const m = await cargarMotor();
+    if (!vigente()) return;
+    crearSuelo(m);
     // Si el modelo todavía carga, espera a que esté listo (hasta 15 s).
-    for (let t = 0; modeloCargado !== id && t < 150 && modelo.id === id; t++) await new Promise((r) => setTimeout(r, 100));
-    if (modelo.id !== id) return;
+    for (let t = 0; modeloCargado !== id && t < 150 && vigente(); t++) await new Promise((r) => setTimeout(r, 100));
+    if (!vigente()) return;
     if (modeloCargado !== id) throw new Error('El modelo todavía no ha cargado');
     // { diferir }: el modelo se mide una sola vez, ya congelado, al salir en ir(1).
     preparado ??= suelo.preparar({ desde: m.Fuentes.modelViewer(mv), hacia: m.Fuentes.qr(urlModelo(modelo)), diferir: true });
     await preparado;
-    if (modelo.id !== id) return;
+    if (!vigente()) return;
     await suelo.ir(1);
     // Comprueba que el QR dibujado se pueda leer: si el navegador no lo pintó bien (GPU de
     // iPhone, memoria…), se cambia por el QR plano.
-    if (suelo.enDestino && modelo.id === id) {
+    if (suelo.enDestino && vigente()) {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       // undefined = no se pudo comprobar (sin red para el lector): se deja el QR 3D.
       const leido = await m.leerQR($('lienzoQr')).catch(() => undefined);
       const mal = leido === null || (typeof leido === 'string' && leido !== urlModelo(modelo));
-      if (mal && suelo.enDestino && modelo.id === id) throw new Error('El QR 3D no se pudo leer');
+      if (mal && suelo.enDestino && vigente()) throw new Error('El QR 3D no se pudo leer');
     }
   } catch (e) {
     console.warn('QR 3D no disponible, se muestra el QR plano:', e);
     suelo?.reiniciar();
-    if (modelo.id === id) mostrarQrPlano(true);
+    if (vigente()) mostrarQrPlano(true);
   } finally {
     ocupado(false);
+    if (soltarAlTerminar) { soltarAlTerminar = false; soltarSuelo(); }
   }
 }
 $('btnQr').addEventListener('click', () => { tic(); abrirQr(); });
@@ -281,9 +307,10 @@ mv.addEventListener('progress', (e) => {
 mv.addEventListener('load', () => {
   modeloCargado = modelo.id;
   // El motor se descarga en un rato libre para que el primer toque al QR responda al instante.
-  // En el teléfono solo si no llegó a ver la AR directa ni pidió ahorrar datos.
+  // En el teléfono solo se descarga (sin armar el lienzo 3D) y si no llegó a ver la AR directa
+  // ni pidió ahorrar datos.
   if (esEscritorio || (!ahorroDatos && !pideAr)) {
-    const precalentar = () => cargarMotor().catch(() => {});
+    const precalentar = () => cargarMotor().then((m) => { if (esEscritorio) crearSuelo(m); }).catch(() => {});
     if (window.requestIdleCallback) requestIdleCallback(precalentar, { timeout: 4000 });
     else setTimeout(precalentar, 1500); // Safari
   }
@@ -452,15 +479,21 @@ function avisar(texto) {
   $('aviso').hidden = !texto;
 }
 
+// Android fuera de Chrome (Samsung Internet, apps…): se abre en Chrome, donde la AR va con la
+// historia. Si el teléfono no tiene Chrome, vuelve aquí con chrome=no y usa la AR que haya.
+const sinChrome = params.get('chrome') === 'no';
+const mandarAChrome = esAndroid && !enChromeAndroid && !sinChrome;
+const arAqui = () => conQuickLook || (mv.canActivateAR && !mandarAChrome);
+
 function revisarAr() {
   const btn = $('btnAr');
   btn.hidden = false;
   avisar('');
-  if (conQuickLook || mv.canActivateAR) {
+  if (arAqui()) {
     $('btnArTexto').textContent = 'Ver en tu espacio';
   } else if (esEscritorio) {
     $('btnArTexto').textContent = 'Ver en tu celular';
-  } else if (esAndroid && !enChromeAndroid) {
+  } else if (mandarAChrome) {
     $('btnArTexto').textContent = 'Abrir en Chrome';
   } else if (esIOS && enAppExterna) {
     btn.hidden = true;
@@ -506,11 +539,12 @@ function abrirAr() {
       accion: `Siguiente: ${siguiente.nombre}`,
       alTocarAccion: () => ir(indice + 1),
     });
-  } else if (mv.canActivateAR) {
-    mv.activateAR();
+  } else if (arAqui()) {
+    soltarSuelo(); // libera la memoria gráfica del QR antes de abrir la cámara
+    mv.activateAR(); // WebXR; si falla, model-viewer pasa solo a Scene Viewer
   } else if (esEscritorio) {
     if (!enQr()) abrirQr(); // en el computador, el QR escondido en el modelo lo lleva al teléfono
-  } else if (esAndroid && !enChromeAndroid) {
+  } else if (mandarAChrome) {
     // En Chrome se abre de nuevo directo a la AR de este modelo.
     const u = new URL(location.href);
     u.searchParams.set('ar', '1');
@@ -527,7 +561,7 @@ const arranque = $('arranque');
 const pideAr = params.get('ar') === '1' && !esEscritorio;
 
 function esperaModelo() {
-  return !arranque.hidden && enChromeAndroid && !conQuickLook;
+  return !arranque.hidden && esAndroid && !mandarAChrome && !conQuickLook;
 }
 
 function cerrarArranque() {
@@ -549,7 +583,7 @@ function prepararArranque() {
     abrirAr();
     // Si Quick Look se abrió, al volver ya está la página; si no, queda el botón de un toque.
     setTimeout(() => { if (salio) cerrarArranque(); }, 1200);
-  } else if (!enChromeAndroid) {
+  } else if (mandarAChrome) {
     $('arranqueTexto').textContent = 'Toca para abrirlo en Chrome';
   } else {
     $('arranqueBtn').disabled = true;
@@ -573,7 +607,18 @@ mv.addEventListener('ar-status', (e) => {
   if (s === 'session-started') { enAr = true; colocado = false; }
   else if (s === 'object-placed' && enAr && !colocado) { colocado = true; iniciarNarracion(); }
   else if (s === 'not-presenting' && enAr) { enAr = false; detenerSonido(); }
-  else if (s === 'failed') enAr = false;
+  else if (s === 'failed') {
+    // Ni WebXR ni Scene Viewer pudieron abrir: suele faltar la app de AR de Google.
+    enAr = false;
+    $('btnAr').hidden = true;
+    avisar('No se pudo abrir la realidad aumentada. Instala o actualiza «Servicios de Google Play para RA» desde Play Store y vuelve a intentarlo; mientras tanto puedes girar el modelo aquí.');
+  }
+});
+// Si el celular pierde el espacio (poca luz, piso liso), se le dice qué hacer.
+mv.addEventListener('ar-tracking', (e) => {
+  $('arAyuda').textContent = e.detail.status === 'not-tracking'
+    ? 'Mueve el celular despacio y apunta a un piso con textura y buena luz'
+    : 'Apunta al piso y toca para colocarlo';
 });
 
 mostrar(true);

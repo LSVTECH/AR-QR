@@ -10,14 +10,14 @@
 // Todo depende de un progreso q (0 = origen, 1 = destino), así la vuelta es la misma
 // animación al revés y también se puede manejar con scroll.
 import * as THREE from 'three';
-import { Piezas } from './render.js?v=20261111d';
-import { emparejar } from './emparejar.js?v=20261111d';
-import { aOklab, ajustarLuz, cssALineal } from './color.js?v=20261111d';
-import { Fuentes } from './fuentes.js?v=20261111d';
-import { Adaptadores } from './adaptadores.js?v=20261111d';
+import { Piezas } from './render.js?v=20261111e';
+import { emparejar } from './emparejar.js?v=20261111e';
+import { aOklab, ajustarLuz, cssALineal } from './color.js?v=20261111e';
+import { Fuentes } from './fuentes.js?v=20261111e';
+import { Adaptadores } from './adaptadores.js?v=20261111e';
 
 export { Fuentes, Adaptadores };
-export { leerQR } from './verificar.js?v=20261111d';
+export { leerQR } from './verificar.js?v=20261111e';
 
 export const POR_DEFECTO = {
   piezas: 'auto',            // cantidad de piezas cuando ningún lado la fija (3D: 2500; 2D: según «paso»)

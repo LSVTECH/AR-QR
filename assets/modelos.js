@@ -114,9 +114,11 @@ export const enAppExterna = /Instagram|FBAN|FBAV|FB_IAB|FBIOS|Line\/|LinkedInApp
 // Enlace que abre esta misma página en Chrome (Android), donde la AR funciona con audio.
 export function enlaceChrome(url = location.href) {
   const u = new URL(url);
-  // Si el teléfono no tiene Chrome, se queda en esta página (sin relanzar la AR) en vez de no hacer nada.
+  // Si el teléfono no tiene Chrome, se queda en esta página (sin relanzar la AR) y con chrome=no
+  // usa la AR de este navegador en vez de volver a mandarlo a Chrome.
   const respaldo = new URL(url);
   respaldo.searchParams.delete('ar');
+  respaldo.searchParams.set('chrome', 'no');
   return `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=${u.protocol.replace(':', '')};package=com.android.chrome;` +
     `S.browser_fallback_url=${encodeURIComponent(respaldo.href)};end`;
 }
